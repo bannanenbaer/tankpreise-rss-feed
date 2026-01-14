@@ -51,7 +51,7 @@ def generate_rss_feed():
             t = ET.SubElement(item, "title")
             price = s.get("price", 0)
             brand = s.get("brand") or s.get("name", "?")
-            t.text = f"{i}. {price:.3f} EUR - {brand}"
+            t.text = f"{i}. {price:.2f} EUR - {brand}"
             d = ET.SubElement(item, "description")
             name = s.get("name", "")
             street = s.get("street", "")
