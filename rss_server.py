@@ -11,7 +11,7 @@ LNG = 9.5671846
 RADIUS = 5
 FUEL_TYPE = "e5"
 MAX_STATIONS = 5
-API_KEY = "00000000-0000-0000-0000-000000000002"
+API_KEY = "77ee8866-8df3-45f0-8f63-70c4d1c76bff"
 API_URL = "https://creativecommons.tankerkoenig.de/json/list.php"
 
 def fetch_fuel_prices():
