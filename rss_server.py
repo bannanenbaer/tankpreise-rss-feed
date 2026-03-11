@@ -830,11 +830,11 @@ def _build_feed():
 
             # Trend-Pfeil (basierend auf letzter Aenderung)
             if change_amount > 0:
-                trend = "+"
+                trend = "(+)"
             elif change_amount < 0:
-                trend = "-"
+                trend = "(-)"
             else:
-                trend = "="
+                trend = "(=)"
 
             # --- KI-PREISPROGNOSE ---
             prediction = _predict_next_change(s, all_fuels)
