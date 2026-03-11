@@ -60,6 +60,22 @@ _cache = TTLCache(maxsize=5, ttl=180)
 # Cache fuer Stationsdetails: 1 Stunde (Oeffnungszeiten aendern sich selten)
 _detail_cache = TTLCache(maxsize=20, ttl=3600)
 
+# ---------------------------------------------------------------------------
+# Statische Shop-Oeffnungszeiten fuer Tankautomaten-Stationen
+# Quelle: raiffeisen.com/standorte/6214 (Stand: Maerz 2026)
+# ---------------------------------------------------------------------------
+# Sommer: April-Oktober, Winter: November-Maerz
+_SHOP_HOURS = {
+    "7080eeac-ac6d-4807-9b23-7c20abb525ac": {  # Raiffeisen Holtensen
+        # Quelle: raiffeisen.com/standorte/6214 (Stand: Maerz 2026)
+        "tankstelle": [
+            "Mo-Fr: 06:00-20:00",
+            "Sa: 07:00-20:00 (S) / 19:00 (W)",
+            "So & Feiertage: 08:00-19:00",
+        ],
+    },
+}
+
 # Pfad fuer die SQLite-Datenbank
 DB_PATH = os.environ.get("TANK_DB_PATH", "/tmp/tankpreise.db")
 
@@ -1096,6 +1112,11 @@ def _build_feed():
 
                 if whole_day:
                     desc_parts.append("*Tankautomat")
+                    # Statische Tankstellen-Oeffnungszeiten anzeigen (falls vorhanden)
+                    shop_info = _SHOP_HOURS.get(station_id)
+                    if shop_info and "tankstelle" in shop_info:
+                        for line in shop_info["tankstelle"]:
+                            desc_parts.append(line)
             else:
                 # Fallback: closesAt aus der v4 API
                 closes_at = s.get("closesAt")
