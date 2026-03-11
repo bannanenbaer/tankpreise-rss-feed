@@ -525,7 +525,12 @@ def _predict_from_static(station, all_fuels, now):
     next_change_cents = 0
 
     for h in sorted(hourly_changes.keys()):
-        if h > hour or (h == hour and minute < 30):
+        if h > hour:
+            next_hour = h
+            next_change_cents = hourly_changes[h]
+            break
+        elif h == hour and minute < 5:
+            # Wenn wir gerade erst in der Stunde sind, koennte die Aenderung noch kommen
             next_hour = h
             next_change_cents = hourly_changes[h]
             break
