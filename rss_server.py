@@ -449,9 +449,9 @@ def _predict_from_patterns(station, all_fuels, patterns, now, source):
             # Skaliere die Aenderung proportional zum Preis
             predicted = round(f_price + next_change_amount, 4)
             if next_change_amount > 0.001:
-                direction = "^"
+                direction = "(+)"
             elif next_change_amount < -0.001:
-                direction = "v"
+                direction = "(-)"
             else:
                 direction = "="
             fuel_predictions[f_name] = {
@@ -555,9 +555,9 @@ def _predict_from_static(station, all_fuels, now):
         if f_price and f_price > 0:
             predicted = round(f_price + change_amount, 4)
             if change_amount > 0.001:
-                direction = "^"
+                direction = "(+)"
             elif change_amount < -0.001:
-                direction = "v"
+                direction = "(-)"
             else:
                 direction = "="
             fuel_predictions[f_name] = {
@@ -826,7 +826,17 @@ def _build_feed():
 
             brand = s.get("brand") or s.get("name", "?")
             is_open = s.get("isOpen", False)
-            status = "offen" if is_open else "geschlossen"
+            # Detail-API fuer wholeDay (Tankautomat) nutzen
+            station_id = s.get("id", "")
+            detail = _fetch_station_detail(station_id)
+            is_whole_day = detail.get("wholeDay", False) if detail else False
+            
+            if is_open:
+                status = "offen"
+            elif is_whole_day:
+                status = "geschlossen / Tankautomat"
+            else:
+                status = "geschlossen"
 
             # Trend-Pfeil (basierend auf letzter Aenderung)
             if change_amount > 0:
@@ -919,22 +929,23 @@ def _build_feed():
                 desc_parts.append(f"{street}, {place} ({dist:.1f}km)")
 
             # 5. Oeffnungszeiten (mit Tankautomat-Kennzeichnung)
-            station_id = s.get("id", "")
-            detail = _fetch_station_detail(station_id)
             if detail:
                 whole_day = detail.get("wholeDay", False)
                 opening_times = detail.get("openingTimes", [])
+                star = "*" if whole_day else ""
 
-                if whole_day:
-                    desc_parts.append("24h*")
-                    desc_parts.append("*Tankautomat")
-                elif opening_times:
+                if opening_times:
                     for ot in opening_times:
                         text = ot.get("text", "")
                         start = ot.get("start", "")[:5]  # HH:MM
                         end = ot.get("end", "")[:5]
                         if text and start and end:
-                            desc_parts.append(f"{text}: {start}-{end}")
+                            desc_parts.append(f"{text}: {start}-{end}{star}")
+                elif whole_day:
+                    desc_parts.append(f"24h{star}")
+                
+                if whole_day:
+                    desc_parts.append("*Tankautomat")
             else:
                 # Fallback: closesAt aus der v4 API
                 closes_at = s.get("closesAt")
