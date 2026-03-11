@@ -1108,10 +1108,9 @@ def _build_feed():
                         desc_parts.append(line)
 
                 elif whole_day:
-                    desc_parts.append(f"24h{star}")
+                    desc_parts.append(f"24h Tankautomat{star}")
 
                 if whole_day:
-                    desc_parts.append("*Tankautomat")
                     # Statische Tankstellen-Oeffnungszeiten anzeigen (falls vorhanden)
                     shop_info = _SHOP_HOURS.get(station_id)
                     if shop_info and "tankstelle" in shop_info:
