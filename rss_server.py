@@ -947,11 +947,14 @@ def _build_feed():
                     # z.B. Mo: 06:00-22:00, Di: 06:00-22:00 -> Mo-Di: 06:00-22:00
                     _DAY_ORDER = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
                     _DAY_ALIASES = {
-                        "montag": "Mo", "dienstag": "Di", "mittwoch": "Mi",
-                        "donnerstag": "Do", "freitag": "Fr", "samstag": "Sa",
-                        "sonntag": "So", "feiertag": "Feiertag",
-                        "mo": "Mo", "di": "Di", "mi": "Mi", "do": "Do",
-                        "fr": "Fr", "sa": "Sa", "so": "So",
+                        "montag": ["Mo"], "dienstag": ["Di"], "mittwoch": ["Mi"],
+                        "donnerstag": ["Do"], "freitag": ["Fr"], "samstag": ["Sa"],
+                        "sonntag": ["So"], "feiertag": ["Feiertag"],
+                        "mo": ["Mo"], "di": ["Di"], "mi": ["Mi"], "do": ["Do"],
+                        "fr": ["Fr"], "sa": ["Sa"], "so": ["So"],
+                        "täglich ausser sonn- und feiertagen": ["Mo", "Di", "Mi", "Do", "Fr", "Sa"],
+                        "werktags": ["Mo", "Di", "Mi", "Do", "Fr", "Sa"],
+                        "wochentags": ["Mo", "Di", "Mi", "Do", "Fr"],
                     }
                     
                     # Zeiten nach Zeitfenster gruppieren
@@ -969,19 +972,26 @@ def _build_feed():
                         
                         # Tag-Name normalisieren
                         text_lower = text.lower().strip()
-                        day_abbr = _DAY_ALIASES.get(text_lower)
                         
-                        if day_abbr and day_abbr in _DAY_ORDER:
-                            if time_key not in time_groups:
-                                time_groups[time_key] = []
-                            if day_abbr not in time_groups[time_key]:
-                                time_groups[time_key].append(day_abbr)
-                                found_days.add(day_abbr)
-                        elif "feiertag" in text_lower:
-                            if time_key not in special_entries:
-                                special_entries[time_key] = []
-                            if "Feiertage" not in special_entries[time_key]:
-                                special_entries[time_key].append("Feiertage")
+                        # Pruefe auf Aliase (auch Teil-Matches fuer komplexe Texte)
+                        matched_days = []
+                        for alias, days in _DAY_ALIASES.items():
+                            if alias in text_lower:
+                                matched_days.extend(days)
+                        
+                        if matched_days:
+                            for day_abbr in matched_days:
+                                if day_abbr in _DAY_ORDER:
+                                    if time_key not in time_groups:
+                                        time_groups[time_key] = []
+                                    if day_abbr not in time_groups[time_key]:
+                                        time_groups[time_key].append(day_abbr)
+                                        found_days.add(day_abbr)
+                                elif day_abbr == "Feiertag":
+                                    if time_key not in special_entries:
+                                        special_entries[time_key] = []
+                                    if "Feiertage" not in special_entries[time_key]:
+                                        special_entries[time_key].append("Feiertage")
                         else:
                             # Unbekannte Tage/Texte
                             if time_key not in special_entries:
