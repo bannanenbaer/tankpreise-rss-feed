@@ -949,25 +949,28 @@ def _build_feed():
                 star = "*" if whole_day else ""
 
                 if opening_times:
-                    # Gleiche Zeiten zusammenfassen
-                    # z.B. Mo: 06:00-22:00, Di: 06:00-22:00 -> Mo-Di: 06:00-22:00
+                    # Saubere Logik: Oeffnungszeiten gruppieren und kompakt anzeigen
+                    # Ziel: Mo-Sa: 06:00-22:00 / So & Feiertage: 07:00-22:00
                     _DAY_ORDER = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
                     _DAY_ALIASES = {
-                        "montag": ["Mo"], "dienstag": ["Di"], "mittwoch": ["Mi"],
-                        "donnerstag": ["Do"], "freitag": ["Fr"], "samstag": ["Sa"],
-                        "sonntag": ["So"], "feiertag": ["Feiertag"],
-                        "mo": ["Mo"], "di": ["Di"], "mi": ["Mi"], "do": ["Do"],
-                        "fr": ["Fr"], "sa": ["Sa"], "so": ["So"],
-                        "täglich ausser sonn- und feiertagen": ["Mo", "Di", "Mi", "Do", "Fr", "Sa"],
-                        "werktags": ["Mo", "Di", "Mi", "Do", "Fr", "Sa"],
-                        "wochentags": ["Mo", "Di", "Mi", "Do", "Fr"],
+                        "montag": "Mo", "dienstag": "Di", "mittwoch": "Mi",
+                        "donnerstag": "Do", "freitag": "Fr", "samstag": "Sa",
+                        "sonntag": "So", "feiertag": "Feiertag",
+                        "mo": "Mo", "di": "Di", "mi": "Mi", "do": "Do",
+                        "fr": "Fr", "sa": "Sa", "so": "So",
                     }
-                    
-                    # Zeiten nach Zeitfenster gruppieren
-                    time_groups = {}  # "06:00-22:00" -> ["Mo", "Di", ...]
-                    special_entries = {}  # "06:00-22:00" -> ["Feiertag", ...]
-                    
-                    found_days = set()
+                    _GROUP_ALIASES = {
+                        "taeglich ausser sonn- und feiertagen": ["Mo","Di","Mi","Do","Fr","Sa"],
+                        "taeglich ausser sonn": ["Mo","Di","Mi","Do","Fr","Sa"],
+                        "werktags": ["Mo","Di","Mi","Do","Fr","Sa"],
+                        "wochentags": ["Mo","Di","Mi","Do","Fr"],
+                        "taeglich": ["Mo","Di","Mi","Do","Fr","Sa","So"],
+                    }
+
+                    # Schritt 1: Jeden Eintrag parsen -> {time_key: set(days), feiertage_times: set}
+                    day_to_time = {}   # "Mo" -> "06:00-22:00"
+                    feiertag_times = set()
+
                     for ot in opening_times:
                         text = (ot.get("text", "") or "").strip()
                         start = (ot.get("start", "") or "")[:5]
@@ -975,111 +978,117 @@ def _build_feed():
                         if not start or not end:
                             continue
                         time_key = f"{start}-{end}"
-                        
-                        # Tag-Name normalisieren
                         text_lower = text.lower().strip()
-                        
-                        # Pruefe auf Aliase (auch Teil-Matches fuer komplexe Texte)
-                        matched_days = []
-                        for alias, days in _DAY_ALIASES.items():
-                            if alias in text_lower:
-                                matched_days.extend(days)
-                        
-                        if matched_days:
-                            for day_abbr in matched_days:
-                                if day_abbr in _DAY_ORDER:
-                                    if time_key not in time_groups:
-                                        time_groups[time_key] = []
-                                    if day_abbr not in time_groups[time_key]:
-                                        time_groups[time_key].append(day_abbr)
-                                        found_days.add(day_abbr)
-                                elif day_abbr == "Feiertag":
-                                    if time_key not in special_entries:
-                                        special_entries[time_key] = []
-                                    if "Feiertage" not in special_entries[time_key]:
-                                        special_entries[time_key].append("Feiertage")
-                        else:
-                            # Unbekannte Tage/Texte
-                            if time_key not in special_entries:
-                                special_entries[time_key] = []
-                            if text not in special_entries[time_key]:
-                                special_entries[time_key].append(text)
-                    
-                    # Fehlende Tage ergaenzen (Mo-Sa oft gleich)
-                    missing_days = [d for d in _DAY_ORDER if d not in found_days]
-                    if missing_days and found_days:
-                        # Nimm die Zeit vom ersten gefundenen Wochentag (Mo-Fr)
-                        ref_time = None
-                        for d in ["Mo", "Di", "Mi", "Do", "Fr"]:
-                            for tk, ds in time_groups.items():
-                                if d in ds:
-                                    ref_time = tk
-                                    break
-                            if ref_time: break
-                        
-                        if not ref_time: # Fallback auf irgendeinen Tag
-                            ref_time = list(time_groups.keys())[0]
-                        
-                        for d in missing_days:
-                            if ref_time not in time_groups: time_groups[ref_time] = []
-                            time_groups[ref_time].append(d)
+                        # Umlaute normalisieren fuer Vergleich
+                        text_lower = text_lower.replace("ä", "ae").replace("ö", "oe").replace("ü", "ue")
 
-                    # Tage zu Bereichen zusammenfassen
+                        # Gruppen-Aliase pruefen (z.B. "werktags")
+                        matched_group = None
+                        for alias, days_list in _GROUP_ALIASES.items():
+                            if alias in text_lower:
+                                matched_group = days_list
+                                break
+
+                        if matched_group:
+                            for d in matched_group:
+                                day_to_time[d] = time_key
+                        elif "feiertag" in text_lower:
+                            feiertag_times.add(time_key)
+                        else:
+                            # Einzelne Tage suchen
+                            for alias, day_abbr in _DAY_ALIASES.items():
+                                if alias in text_lower and day_abbr != "Feiertag":
+                                    day_to_time[day_abbr] = time_key
+
+                    # Schritt 2: Fehlende Wochentage mit Referenzzeit auffuellen
+                    # (nur Mo-Sa, nicht So - So hat oft eigene Zeiten)
+                    ref_time = None
+                    for d in ["Mo", "Di", "Mi", "Do", "Fr"]:
+                        if d in day_to_time:
+                            ref_time = day_to_time[d]
+                            break
+                    if ref_time:
+                        for d in ["Mo", "Di", "Mi", "Do", "Fr", "Sa"]:
+                            if d not in day_to_time:
+                                day_to_time[d] = ref_time
+                        # So nur ergaenzen wenn keine eigene Zeit und keine Feiertags-Zeit
+                        if "So" not in day_to_time and not feiertag_times:
+                            day_to_time["So"] = ref_time
+
+                    # Schritt 3: Zeiten -> Tage gruppieren
+                    time_to_days = {}
+                    for d, t in day_to_time.items():
+                        if t not in time_to_days:
+                            time_to_days[t] = []
+                        if d not in time_to_days[t]:
+                            time_to_days[t].append(d)
+
+                    # Schritt 4: Ausgabe-Zeilen bauen
                     final_lines = []
-                    for time_key, days in time_groups.items():
-                        # Sortiere nach Wochentag-Reihenfolge
-                        days_sorted = sorted(days, key=lambda d: _DAY_ORDER.index(d) if d in _DAY_ORDER else 99)
-                        
-                        # Trenne Mo-Sa von So
-                        weekday_days = [d for d in days_sorted if d != "So"]
-                        sunday = "So" in days_sorted
-                        
-                        # Mo-Sa als Bereich
-                        if weekday_days:
-                            ranges = []
-                            i = 0
-                            while i < len(weekday_days):
-                                start_idx = _DAY_ORDER.index(weekday_days[i])
-                                end_idx = start_idx
-                                while (i + 1 < len(weekday_days) and
-                                       _DAY_ORDER.index(weekday_days[i + 1]) == end_idx + 1):
-                                    end_idx += 1
-                                    i += 1
-                                if start_idx == end_idx:
-                                    ranges.append(_DAY_ORDER[start_idx])
-                                else:
-                                    ranges.append(f"{_DAY_ORDER[start_idx]}-{_DAY_ORDER[end_idx]}")
+
+                    def _days_to_range(days):
+                        """Wandelt eine Liste von Tagen in Bereichs-Strings um."""
+                        sorted_days = sorted(days, key=lambda d: _DAY_ORDER.index(d) if d in _DAY_ORDER else 99)
+                        ranges = []
+                        i = 0
+                        while i < len(sorted_days):
+                            start_idx = _DAY_ORDER.index(sorted_days[i])
+                            end_idx = start_idx
+                            while (i + 1 < len(sorted_days) and
+                                   _DAY_ORDER.index(sorted_days[i + 1]) == end_idx + 1):
+                                end_idx += 1
                                 i += 1
-                            
-                            day_str = ", ".join(ranges)
+                            if start_idx == end_idx:
+                                ranges.append(_DAY_ORDER[start_idx])
+                            else:
+                                ranges.append(f"{_DAY_ORDER[start_idx]}-{_DAY_ORDER[end_idx]}")
+                            i += 1
+                        return ", ".join(ranges)
+
+                    for time_key in sorted(time_to_days.keys()):
+                        days = time_to_days[time_key]
+                        # Trenne Mo-Sa von So
+                        weekday_days = [d for d in days if d != "So"]
+                        has_sunday = "So" in days
+
+                        # Pruefen ob Feiertage die gleiche Zeit haben
+                        feiertag_same_time = time_key in feiertag_times
+
+                        if weekday_days:
+                            day_str = _days_to_range(weekday_days)
                             final_lines.append(f"{day_str}: {time_key}{star}")
-                        
-                        # Sonntag separat nur wenn Feiertage andere Zeit haben
-                        if sunday:
-                            if time_key in special_entries and "Feiertage" in special_entries[time_key]:
-                                # Feiertage haben andere Zeit, zeige So & Feiertage separat
+
+                        if has_sunday:
+                            if feiertag_same_time:
+                                # So und Feiertage haben die gleiche Zeit -> zusammenfassen
                                 final_lines.append(f"So & Feiertage: {time_key}{star}")
-                                special_entries[time_key].remove("Feiertage")
-                            # Sonst: So ist bereits in Mo-Sa enthalten, nicht separat anzeigen
-                    
-                    # Restliche Spezial-Eintraege
-                    for time_key, labels in special_entries.items():
-                        if labels:
-                            label_str = ", ".join(labels)
-                            final_lines.append(f"{label_str}: {time_key}{star}")
-                    
-                    # Sortiere final_lines nach Wochentag-Reihenfolge des ersten Tags
+                                feiertag_times.discard(time_key)
+                            elif weekday_days:
+                                # So hat gleiche Zeit wie Mo-Sa, aber Feiertage haben andere Zeit
+                                # -> So nicht separat anzeigen (ist in Mo-Sa enthalten)
+                                # Feiertage werden spaeter separat angezeigt
+                                pass
+                            else:
+                                # So hat eigene Zeit (keine Wochentage in dieser Gruppe)
+                                final_lines.append(f"So: {time_key}{star}")
+
+                    # Restliche Feiertags-Zeiten (andere Zeit als So)
+                    for ft in sorted(feiertag_times):
+                        final_lines.append(f"So & Feiertage: {ft}{star}")
+
+                    # Sortiere nach erstem Tag
                     def _sort_key(line):
                         for d in _DAY_ORDER:
-                            if line.startswith(d): return _DAY_ORDER.index(d)
+                            if line.startswith(d):
+                                return _DAY_ORDER.index(d)
                         return 99
-                    
+
                     for line in sorted(final_lines, key=_sort_key):
                         desc_parts.append(line)
-                        
+
                 elif whole_day:
                     desc_parts.append(f"24h{star}")
-                
+
                 if whole_day:
                     desc_parts.append("*Tankautomat")
             else:
