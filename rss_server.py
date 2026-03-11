@@ -345,11 +345,21 @@ def _build_feed():
             else:
                 trend = "="  # gleich
 
+            # --- PREISPROGNOSE ---
+            prediction, _ = _predict_price(s, e5_fuel)
+            
+            # Warnsignal '!' falls Preis in < 15 Min steigt
+            warning = ""
+            if prediction and prediction["change"] > 0:
+                time_diff = prediction["time"] - now
+                if time_diff.total_seconds() <= 900:  # 15 Minuten
+                    warning = "! "
+
             # --- TITEL ---
-            # Format: "1,88€ v | TAS (offen)"
+            # Format: "! 1,88€ v | TAS (offen)"
             item = ET.SubElement(channel, "item")
             ET.SubElement(item, "title").text = (
-                f"{_format_price(price)}€ {trend} | {brand} ({status})"
+                f"{warning}{_format_price(price)}€ {trend} | {brand} ({status})"
             )
 
             # --- BESCHREIBUNG / DETAILS ---
@@ -403,8 +413,7 @@ def _build_feed():
                         f"Schliesst um: {close_dt.strftime('%H:%M')} Uhr"
                     )
 
-            # Preisprognose
-            prediction, _ = _predict_price(s, e5_fuel)
+            # Prognose-Details in Beschreibung
             if prediction:
                 desc_parts.append("")
                 desc_parts.append("--- Preisprognose ---")
