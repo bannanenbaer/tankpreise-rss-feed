@@ -14,6 +14,8 @@ Nutzt die Tankerkönig API v4 für:
 
 from flask import Flask, Response
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from datetime import datetime, timedelta
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
@@ -92,47 +94,55 @@ def _predict_price(station, fuel_data):
     # - Preise fallen gegen 18:00-20:00 Uhr (bester Zeitpunkt!)
     # - Preise steigen wieder ab 21:00-22:00 Uhr
 
-    if 5 <= hour < 8:
-        # Morgens: Preise werden wahrscheinlich noch steigen
-        predicted_change = +0.02
-        next_change_hours = 8 - hour
-        reason = "Preise steigen typischerweise morgens"
-    elif 8 <= hour < 10:
-        # Vormittag: Preise beginnen zu fallen
-        predicted_change = -0.02
-        next_change_hours = 2
-        reason = "Preise fallen typischerweise vormittags"
-    elif 10 <= hour < 13:
-        # Mittag: Preise relativ stabil oder leicht steigend
-        predicted_change = +0.01
-        next_change_hours = 13 - hour
-        reason = "Preise steigen typischerweise mittags wieder"
-    elif 13 <= hour < 18:
-        # Nachmittag: Preise werden fallen
+    is_weekend = now.weekday() >= 5
+    
+    if 5 <= hour < 9:
+        # Morgens: Preise steigen massiv (Berufsverkehr)
+        predicted_change = +0.05 if not is_weekend else +0.02
+        next_change_hours = 9 - hour
+        reason = "Preise steigen morgens stark an"
+    elif 9 <= hour < 12:
+        # Vormittag: Erste Entspannung
         predicted_change = -0.03
+        next_change_hours = 12 - hour
+        reason = "Preise fallen nach dem morgendlichen Hoch"
+    elif 12 <= hour < 15:
+        # Mittag: Kleiner Peak
+        predicted_change = +0.02
+        next_change_hours = 15 - hour
+        reason = "Preise steigen mittags oft leicht an"
+    elif 15 <= hour < 18:
+        # Nachmittag: Kontinuierlicher Abfall
+        predicted_change = -0.04
         next_change_hours = 18 - hour
-        reason = "Preise fallen typischerweise ab 18 Uhr"
-    elif 18 <= hour < 20:
-        # Abend: Bester Zeitpunkt zum Tanken!
+        reason = "Preise fallen am Nachmittag stetig"
+    elif 18 <= hour < 21:
+        # Abend: Tiefpunkt des Tages (Bester Zeitpunkt!)
         predicted_change = -0.01
+        next_change_hours = 21 - hour
+        reason = "Jetzt ist statistisch der beste Zeitpunkt!"
+    elif 21 <= hour < 23:
+        # Spaetabend: Preise ziehen wieder an
+        predicted_change = +0.06
         next_change_hours = 1
-        reason = "Jetzt ist ein guter Zeitpunkt zum Tanken!"
-    elif 20 <= hour < 22:
-        # Spätabend: Preise steigen wieder
-        predicted_change = +0.03
-        next_change_hours = 1
-        reason = "Preise steigen typischerweise spätabends"
+        reason = "Preise steigen nachts massiv an"
     else:
-        # Nacht: Preise bleiben hoch bis morgen
+        # Nacht: Hohes Niveau
         predicted_change = 0
         next_change_hours = max(1, 5 - hour if hour < 5 else 29 - hour)
-        reason = "Preise bleiben nachts meist stabil"
+        reason = "Preise bleiben nachts auf hohem Niveau"
 
     # Trend der letzten Änderung einbeziehen
-    if change_amount > 0:
-        reason += " (Trend: steigend)"
+    if change_amount > 0.01:
+        reason += " (Trend: stark steigend)"
+        predicted_change += 0.01
+    elif change_amount < -0.01:
+        reason += " (Trend: stark fallend)"
+        predicted_change -= 0.01
+    elif change_amount > 0:
+        reason += " (Trend: leicht steigend)"
     elif change_amount < 0:
-        reason += " (Trend: fallend)"
+        reason += " (Trend: leicht fallend)"
 
     predicted_price = round(current_price + predicted_change, 3)
     next_change_time = now + timedelta(hours=next_change_hours)
@@ -214,15 +224,20 @@ def _fetch_stations():
         return cached
 
     try:
-        resp = requests.get(API_URL, params={
+        # Session mit Retries fuer mehr Zuverlaessigkeit
+        session = requests.Session()
+        retries = Retry(total=3, backoff_factor=0.5, status_forcelist=[500, 502, 503, 504])
+        session.mount("https://", HTTPAdapter(max_retries=retries))
+
+        resp = session.get(API_URL, params={
             "apikey": API_KEY,
             "lat": LAT,
             "lng": LNG,
             "rad": RADIUS,
-        }, timeout=10)
+        }, timeout=8)
 
         if resp.status_code != 200:
-            log.error("API Status %s", resp.status_code)
+            log.error("API Status %s: %s", resp.status_code, resp.text[:100])
             return []
 
         data = resp.json()
