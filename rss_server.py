@@ -958,6 +958,7 @@ def _build_feed():
                     time_groups = {}  # "06:00-22:00" -> ["Mo", "Di", ...]
                     special_entries = {}  # "06:00-22:00" -> ["Feiertag", ...]
                     
+                    found_days = set()
                     for ot in opening_times:
                         text = (ot.get("text", "") or "").strip()
                         start = (ot.get("start", "") or "")[:5]
@@ -975,6 +976,7 @@ def _build_feed():
                                 time_groups[time_key] = []
                             if day_abbr not in time_groups[time_key]:
                                 time_groups[time_key].append(day_abbr)
+                                found_days.add(day_abbr)
                         elif "feiertag" in text_lower:
                             if time_key not in special_entries:
                                 special_entries[time_key] = []
@@ -987,6 +989,25 @@ def _build_feed():
                             if text not in special_entries[time_key]:
                                 special_entries[time_key].append(text)
                     
+                    # Fehlende Tage ergaenzen (Mo-Sa oft gleich)
+                    missing_days = [d for d in _DAY_ORDER if d not in found_days]
+                    if missing_days and found_days:
+                        # Nimm die Zeit vom ersten gefundenen Wochentag (Mo-Fr)
+                        ref_time = None
+                        for d in ["Mo", "Di", "Mi", "Do", "Fr"]:
+                            for tk, ds in time_groups.items():
+                                if d in ds:
+                                    ref_time = tk
+                                    break
+                            if ref_time: break
+                        
+                        if not ref_time: # Fallback auf irgendeinen Tag
+                            ref_time = list(time_groups.keys())[0]
+                        
+                        for d in missing_days:
+                            if ref_time not in time_groups: time_groups[ref_time] = []
+                            time_groups[ref_time].append(d)
+
                     # Tage zu Bereichen zusammenfassen
                     final_lines = []
                     for time_key, days in time_groups.items():
