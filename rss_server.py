@@ -894,12 +894,13 @@ def _build_feed():
                             pred_price = pred_info["predicted"]
                             direction = pred_info["direction"]
                             # Pfeil zeigt immer auf den niedrigeren Preis
+                            # Reihenfolge: hoeherer Preis PFEIL niedrigerer Preis
                             if pred_price < f_price:
-                                # Preis faellt -> Pfeil nach rechts zum niedrigeren Preis
+                                # Preis faellt -> Pfeil zeigt auf niedrigeren zukuenftigen Preis
                                 detail_line = f"{f_name}: {_format_price(f_price)} EUR > {_format_price(pred_price)} EUR"
                             elif pred_price > f_price:
-                                # Preis steigt -> Pfeil nach links zum niedrigeren Preis
-                                detail_line = f"{f_name}: {_format_price(f_price)} EUR < {_format_price(pred_price)} EUR"
+                                # Preis steigt -> Pfeil zeigt auf niedrigeren aktuellen Preis
+                                detail_line = f"{f_name}: {_format_price(pred_price)} EUR > {_format_price(f_price)} EUR"
                             else:
                                 # Preis bleibt gleich
                                 detail_line = f"{f_name}: {_format_price(f_price)} EUR = {_format_price(pred_price)} EUR"
@@ -1053,13 +1054,13 @@ def _build_feed():
                             day_str = ", ".join(ranges)
                             final_lines.append(f"{day_str}: {time_key}{star}")
                         
-                        # Sonntag separat (mit Feiertagen kombiniert wenn gleiche Zeit)
+                        # Sonntag separat nur wenn Feiertage andere Zeit haben
                         if sunday:
                             if time_key in special_entries and "Feiertage" in special_entries[time_key]:
+                                # Feiertage haben andere Zeit, zeige So & Feiertage separat
                                 final_lines.append(f"So & Feiertage: {time_key}{star}")
                                 special_entries[time_key].remove("Feiertage")
-                            else:
-                                final_lines.append(f"So: {time_key}{star}")
+                            # Sonst: So ist bereits in Mo-Sa enthalten, nicht separat anzeigen
                     
                     # Restliche Spezial-Eintraege
                     for time_key, labels in special_entries.items():
