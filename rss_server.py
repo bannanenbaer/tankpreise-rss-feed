@@ -888,9 +888,14 @@ def _build_feed():
                         if pred_info:
                             pred_price = pred_info["predicted"]
                             direction = pred_info["direction"]
+                            # In den Details > und < statt (+) und (-)
+                            detail_dir = direction
+                            if direction == "(+)": detail_dir = ">"
+                            elif direction == "(-)": detail_dir = "<"
+                            
                             desc_parts.append(
                                 f"{f_name}: {_format_price(f_price)} EUR "
-                                f"({direction}{_format_price(pred_price)} EUR)"
+                                f"({detail_dir}{_format_price(pred_price)} EUR)"
                             )
                         else:
                             desc_parts.append(
