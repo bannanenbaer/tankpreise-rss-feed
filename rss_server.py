@@ -928,19 +928,76 @@ def _build_feed():
             if street:
                 desc_parts.append(f"{street}, {place} ({dist:.1f}km)")
 
-            # 5. Oeffnungszeiten (mit Tankautomat-Kennzeichnung)
+            # 5. Oeffnungszeiten (kompakt, mit Tankautomat-Kennzeichnung)
             if detail:
                 whole_day = detail.get("wholeDay", False)
                 opening_times = detail.get("openingTimes", [])
                 star = "*" if whole_day else ""
 
                 if opening_times:
+                    # Gleiche Zeiten zusammenfassen
+                    # z.B. Mo: 06:00-22:00, Di: 06:00-22:00 -> Mo-Di: 06:00-22:00
+                    _DAY_ORDER = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+                    _DAY_ALIASES = {
+                        "montag": "Mo", "dienstag": "Di", "mittwoch": "Mi",
+                        "donnerstag": "Do", "freitag": "Fr", "samstag": "Sa",
+                        "sonntag": "So", "feiertag": "Feiertag",
+                        "mo": "Mo", "di": "Di", "mi": "Mi", "do": "Do",
+                        "fr": "Fr", "sa": "Sa", "so": "So",
+                    }
+                    
+                    # Zeiten nach Zeitfenster gruppieren
+                    time_groups = {}  # "06:00-22:00" -> ["Mo", "Di", ...]
+                    special_entries = []  # Feiertage etc.
+                    
                     for ot in opening_times:
-                        text = ot.get("text", "")
-                        start = ot.get("start", "")[:5]  # HH:MM
-                        end = ot.get("end", "")[:5]
-                        if text and start and end:
-                            desc_parts.append(f"{text}: {start}-{end}{star}")
+                        text = (ot.get("text", "") or "").strip()
+                        start = (ot.get("start", "") or "")[:5]
+                        end = (ot.get("end", "") or "")[:5]
+                        if not start or not end:
+                            continue
+                        time_key = f"{start}-{end}"
+                        
+                        # Tag-Name normalisieren
+                        text_lower = text.lower().strip()
+                        day_abbr = _DAY_ALIASES.get(text_lower)
+                        
+                        if day_abbr and day_abbr in _DAY_ORDER:
+                            if time_key not in time_groups:
+                                time_groups[time_key] = []
+                            time_groups[time_key].append(day_abbr)
+                        elif "feiertag" in text_lower:
+                            special_entries.append(f"So & Feiertage: {time_key}{star}")
+                        else:
+                            special_entries.append(f"{text}: {time_key}{star}")
+                    
+                    # Tage zu Bereichen zusammenfassen
+                    for time_key, days in time_groups.items():
+                        # Sortiere nach Wochentag-Reihenfolge
+                        days_sorted = sorted(days, key=lambda d: _DAY_ORDER.index(d) if d in _DAY_ORDER else 99)
+                        
+                        # Zusammenhaengende Bereiche finden
+                        ranges = []
+                        i = 0
+                        while i < len(days_sorted):
+                            start_idx = _DAY_ORDER.index(days_sorted[i])
+                            end_idx = start_idx
+                            while (i + 1 < len(days_sorted) and
+                                   _DAY_ORDER.index(days_sorted[i + 1]) == end_idx + 1):
+                                end_idx += 1
+                                i += 1
+                            if start_idx == end_idx:
+                                ranges.append(_DAY_ORDER[start_idx])
+                            else:
+                                ranges.append(f"{_DAY_ORDER[start_idx]}-{_DAY_ORDER[end_idx]}")
+                            i += 1
+                        
+                        day_str = ", ".join(ranges)
+                        desc_parts.append(f"{day_str}: {time_key}{star}")
+                    
+                    for se in special_entries:
+                        desc_parts.append(se)
+                        
                 elif whole_day:
                     desc_parts.append(f"24h{star}")
                 
