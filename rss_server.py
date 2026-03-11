@@ -1024,30 +1024,37 @@ def _build_feed():
                         # Sortiere nach Wochentag-Reihenfolge
                         days_sorted = sorted(days, key=lambda d: _DAY_ORDER.index(d) if d in _DAY_ORDER else 99)
                         
-                        # Zusammenhaengende Bereiche finden
-                        ranges = []
-                        i = 0
-                        while i < len(days_sorted):
-                            start_idx = _DAY_ORDER.index(days_sorted[i])
-                            end_idx = start_idx
-                            while (i + 1 < len(days_sorted) and
-                                   _DAY_ORDER.index(days_sorted[i + 1]) == end_idx + 1):
-                                end_idx += 1
+                        # Trenne Mo-Sa von So
+                        weekday_days = [d for d in days_sorted if d != "So"]
+                        sunday = "So" in days_sorted
+                        
+                        # Mo-Sa als Bereich
+                        if weekday_days:
+                            ranges = []
+                            i = 0
+                            while i < len(weekday_days):
+                                start_idx = _DAY_ORDER.index(weekday_days[i])
+                                end_idx = start_idx
+                                while (i + 1 < len(weekday_days) and
+                                       _DAY_ORDER.index(weekday_days[i + 1]) == end_idx + 1):
+                                    end_idx += 1
+                                    i += 1
+                                if start_idx == end_idx:
+                                    ranges.append(_DAY_ORDER[start_idx])
+                                else:
+                                    ranges.append(f"{_DAY_ORDER[start_idx]}-{_DAY_ORDER[end_idx]}")
                                 i += 1
-                            if start_idx == end_idx:
-                                ranges.append(_DAY_ORDER[start_idx])
+                            
+                            day_str = ", ".join(ranges)
+                            final_lines.append(f"{day_str}: {time_key}{star}")
+                        
+                        # Sonntag separat (mit Feiertagen kombiniert wenn gleiche Zeit)
+                        if sunday:
+                            if time_key in special_entries and "Feiertage" in special_entries[time_key]:
+                                final_lines.append(f"So & Feiertage: {time_key}{star}")
+                                special_entries[time_key].remove("Feiertage")
                             else:
-                                ranges.append(f"{_DAY_ORDER[start_idx]}-{_DAY_ORDER[end_idx]}")
-                            i += 1
-                        
-                        day_str = ", ".join(ranges)
-                        
-                        # Wenn Sonntag in dieser Gruppe ist, pruefen ob Feiertage die gleiche Zeit haben
-                        if "So" in days and time_key in special_entries and "Feiertage" in special_entries[time_key]:
-                            day_str = day_str.replace("So", "So & Feiertage")
-                            special_entries[time_key].remove("Feiertage")
-                        
-                        final_lines.append(f"{day_str}: {time_key}{star}")
+                                final_lines.append(f"So: {time_key}{star}")
                     
                     # Restliche Spezial-Eintraege
                     for time_key, labels in special_entries.items():
