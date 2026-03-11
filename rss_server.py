@@ -888,15 +888,18 @@ def _build_feed():
                         if pred_info:
                             pred_price = pred_info["predicted"]
                             direction = pred_info["direction"]
-                            # In den Details > und < statt (+) und (-)
-                            detail_dir = direction
-                            if direction == "(+)": detail_dir = ">"
-                            elif direction == "(-)": detail_dir = "<"
+                            # Pfeil zeigt immer auf den niedrigeren Preis
+                            if pred_price < f_price:
+                                # Preis faellt -> Pfeil nach rechts zum niedrigeren Preis
+                                detail_line = f"{f_name}: {_format_price(f_price)} EUR > {_format_price(pred_price)} EUR"
+                            elif pred_price > f_price:
+                                # Preis steigt -> Pfeil nach links zum niedrigeren Preis
+                                detail_line = f"{f_name}: {_format_price(f_price)} EUR < {_format_price(pred_price)} EUR"
+                            else:
+                                # Preis bleibt gleich
+                                detail_line = f"{f_name}: {_format_price(f_price)} EUR = {_format_price(pred_price)} EUR"
                             
-                            desc_parts.append(
-                                f"{f_name}: {_format_price(f_price)} EUR "
-                                f"({detail_dir}{_format_price(pred_price)} EUR)"
-                            )
+                            desc_parts.append(detail_line)
                         else:
                             desc_parts.append(
                                 f"{f_name}: {_format_price(f_price)} EUR"
