@@ -449,9 +449,9 @@ def _predict_from_patterns(station, all_fuels, patterns, now, source):
             # Skaliere die Aenderung proportional zum Preis
             predicted = round(f_price + next_change_amount, 4)
             if next_change_amount > 0.001:
-                direction = "↑"
+                direction = "^"
             elif next_change_amount < -0.001:
-                direction = "↓"
+                direction = "v"
             else:
                 direction = "="
             fuel_predictions[f_name] = {
@@ -555,9 +555,9 @@ def _predict_from_static(station, all_fuels, now):
         if f_price and f_price > 0:
             predicted = round(f_price + change_amount, 4)
             if change_amount > 0.001:
-                direction = "↑"
+                direction = "^"
             elif change_amount < -0.001:
-                direction = "↓"
+                direction = "v"
             else:
                 direction = "="
             fuel_predictions[f_name] = {
@@ -830,9 +830,9 @@ def _build_feed():
 
             # Trend-Pfeil (basierend auf letzter Aenderung)
             if change_amount > 0:
-                trend = "↑"
+                trend = "+"
             elif change_amount < 0:
-                trend = "↓"
+                trend = "-"
             else:
                 trend = "="
 
