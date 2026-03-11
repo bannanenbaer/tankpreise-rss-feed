@@ -956,7 +956,7 @@ def _build_feed():
                     
                     # Zeiten nach Zeitfenster gruppieren
                     time_groups = {}  # "06:00-22:00" -> ["Mo", "Di", ...]
-                    special_entries = []  # Feiertage etc.
+                    special_entries = {}  # "06:00-22:00" -> ["Feiertag", ...]
                     
                     for ot in opening_times:
                         text = (ot.get("text", "") or "").strip()
@@ -973,13 +973,22 @@ def _build_feed():
                         if day_abbr and day_abbr in _DAY_ORDER:
                             if time_key not in time_groups:
                                 time_groups[time_key] = []
-                            time_groups[time_key].append(day_abbr)
+                            if day_abbr not in time_groups[time_key]:
+                                time_groups[time_key].append(day_abbr)
                         elif "feiertag" in text_lower:
-                            special_entries.append(f"So & Feiertage: {time_key}{star}")
+                            if time_key not in special_entries:
+                                special_entries[time_key] = []
+                            if "Feiertage" not in special_entries[time_key]:
+                                special_entries[time_key].append("Feiertage")
                         else:
-                            special_entries.append(f"{text}: {time_key}{star}")
+                            # Unbekannte Tage/Texte
+                            if time_key not in special_entries:
+                                special_entries[time_key] = []
+                            if text not in special_entries[time_key]:
+                                special_entries[time_key].append(text)
                     
                     # Tage zu Bereichen zusammenfassen
+                    final_lines = []
                     for time_key, days in time_groups.items():
                         # Sortiere nach Wochentag-Reihenfolge
                         days_sorted = sorted(days, key=lambda d: _DAY_ORDER.index(d) if d in _DAY_ORDER else 99)
@@ -1001,10 +1010,28 @@ def _build_feed():
                             i += 1
                         
                         day_str = ", ".join(ranges)
-                        desc_parts.append(f"{day_str}: {time_key}{star}")
+                        
+                        # Wenn Sonntag in dieser Gruppe ist, pruefen ob Feiertage die gleiche Zeit haben
+                        if "So" in days and time_key in special_entries and "Feiertage" in special_entries[time_key]:
+                            day_str = day_str.replace("So", "So & Feiertage")
+                            special_entries[time_key].remove("Feiertage")
+                        
+                        final_lines.append(f"{day_str}: {time_key}{star}")
                     
-                    for se in special_entries:
-                        desc_parts.append(se)
+                    # Restliche Spezial-Eintraege
+                    for time_key, labels in special_entries.items():
+                        if labels:
+                            label_str = ", ".join(labels)
+                            final_lines.append(f"{label_str}: {time_key}{star}")
+                    
+                    # Sortiere final_lines nach Wochentag-Reihenfolge des ersten Tags
+                    def _sort_key(line):
+                        for d in _DAY_ORDER:
+                            if line.startswith(d): return _DAY_ORDER.index(d)
+                        return 99
+                    
+                    for line in sorted(final_lines, key=_sort_key):
+                        desc_parts.append(line)
                         
                 elif whole_day:
                     desc_parts.append(f"24h{star}")
