@@ -1054,22 +1054,27 @@ def _build_feed():
                         # Pruefen ob Feiertage die gleiche Zeit haben
                         feiertag_same_time = time_key in feiertag_times
 
-                        if weekday_days:
+                        if weekday_days and has_sunday and not feiertag_same_time and not feiertag_times:
+                            # Mo-So alle gleich, keine Feiertage -> Mo-So zusammenfassen
+                            all_days = weekday_days + ["So"]
+                            day_str = _days_to_range(all_days)
+                            final_lines.append(f"{day_str}: {time_key}{star}")
+                        elif weekday_days:
                             day_str = _days_to_range(weekday_days)
                             final_lines.append(f"{day_str}: {time_key}{star}")
 
-                        if has_sunday:
+                            if has_sunday:
+                                if feiertag_same_time:
+                                    # So und Feiertage haben die gleiche Zeit -> zusammenfassen
+                                    final_lines.append(f"So & Feiertage: {time_key}{star}")
+                                    feiertag_times.discard(time_key)
+                                # else: So hat gleiche Zeit wie Mo-Sa, Feiertage separat -> So weglassen
+                        elif has_sunday:
+                            # Nur So in dieser Gruppe (keine Wochentage)
                             if feiertag_same_time:
-                                # So und Feiertage haben die gleiche Zeit -> zusammenfassen
                                 final_lines.append(f"So & Feiertage: {time_key}{star}")
                                 feiertag_times.discard(time_key)
-                            elif weekday_days:
-                                # So hat gleiche Zeit wie Mo-Sa, aber Feiertage haben andere Zeit
-                                # -> So nicht separat anzeigen (ist in Mo-Sa enthalten)
-                                # Feiertage werden spaeter separat angezeigt
-                                pass
                             else:
-                                # So hat eigene Zeit (keine Wochentage in dieser Gruppe)
                                 final_lines.append(f"So: {time_key}{star}")
 
                     # Restliche Feiertags-Zeiten (andere Zeit als So)
