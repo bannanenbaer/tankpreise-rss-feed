@@ -320,7 +320,7 @@ def _build_feed():
             place = s.get("place", "")
             dist = s.get("dist", 0)
             is_open = s.get("isOpen", False)
-            status = "OFFEN" if is_open else "GESCHLOSSEN"
+            status = "offen" if is_open else "geschlossen"
 
             # Trend-Pfeil
             if change_amount > 0:
@@ -331,10 +331,10 @@ def _build_feed():
                 trend = "="  # gleich
 
             # --- TITEL ---
-            # Format: "1,88 v | TAS, OFFEN"
+            # Format: "1,88€ v | TAS (offen)"
             item = ET.SubElement(channel, "item")
             ET.SubElement(item, "title").text = (
-                f"{_format_price(price)} {trend} | {brand}, {status}"
+                f"{_format_price(price)}€ {trend} | {brand} ({status})"
             )
 
             # --- BESCHREIBUNG / DETAILS ---
