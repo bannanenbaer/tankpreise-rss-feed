@@ -331,11 +331,10 @@ def _build_feed():
                 trend = "="  # gleich
 
             # --- TITEL ---
-            # Format: "1. 1,88 EUR v - TAS (OFFEN)"
+            # Format: "1,88 v | TAS, OFFEN"
             item = ET.SubElement(channel, "item")
             ET.SubElement(item, "title").text = (
-                f"{i}. {_format_price(price)} EUR {trend} - "
-                f"{brand} ({status})"
+                f"{_format_price(price)} {trend} | {brand}, {status}"
             )
 
             # --- BESCHREIBUNG / DETAILS ---
@@ -445,25 +444,8 @@ def rss_feed():
 
 @app.route("/health")
 def health():
-    """Health-Check."""
-    try:
-        stations = _fetch_stations()
-        cheapest = None
-        for s in stations:
-            for f in s.get("fuels", []):
-                if f.get("name", "").lower().startswith("super e5"):
-                    cheapest = f.get("price")
-                    break
-            if cheapest:
-                break
-        return {
-            "status": "ok",
-            "stations": len(stations),
-            "cheapest_e5": cheapest,
-            "api_version": "v4",
-        }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}, 500
+    """Health-Check (leichtgewichtig fuer Render.com)."""
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":
