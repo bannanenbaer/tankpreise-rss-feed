@@ -291,13 +291,30 @@ def _get_hourly_profile(station_id, fuel_type="e5", weekday=None, days_back=28):
     return profile
 
 
-def _get_change_pattern(station_id, fuel_type="e5", days_back=28):
-    """Analysiert die typischen Preisaenderungs-Zeitpunkte einer Station.
+def _get_fuel_key(f_name):
+    """Mapt Kraftstoff-Anzeigenamen auf DB-Key (e5 / diesel / e10)."""
+    f_lower = f_name.lower()
+    if "e5" in f_lower:
+        return "e5"
+    elif "e10" in f_lower:
+        return "e10"
+    elif "diesel" in f_lower:
+        return "diesel"
+    return None
+
+
+def _get_change_pattern(station_id, fuel_type="e5", days_back=28, all_stations=False):
+    """Analysiert die typischen Preisaenderungs-Zeitpunkte.
+
+    station_id: spezifische Station oder None (wird ignoriert wenn all_stations=True)
+    all_stations: True => alle Stationen gemeinsam auswerten (mehr Datenpunkte)
 
     Gibt ein Dict zurueck: {weekday: [(hour, minute, avg_change, count), ...]}
     Neuere Daten werden staerker gewichtet (Halbwertszeit: 14 Tage).
+    Extreme Ausreisser (>15 Ct Aenderung) werden ignoriert.
     """
     HALFLIFE_DAYS = 14.0
+    OUTLIER_THRESHOLD = 0.15  # > 15 Cent = einmaliger Markteffekt, kein Tagesmuster
     patterns = {}
     cutoff = (datetime.now(BERLIN_TZ) - timedelta(days=days_back)).isoformat()
     now_dt = datetime.now(BERLIN_TZ)
@@ -305,17 +322,29 @@ def _get_change_pattern(station_id, fuel_type="e5", days_back=28):
     with _db_lock:
         conn = sqlite3.connect(DB_PATH)
         try:
-            rows = conn.execute(
-                "SELECT weekday, hour, minute, change_amount, timestamp "
-                "FROM price_changes "
-                "WHERE station_id = ? AND fuel_type = ? AND timestamp > ? "
-                "ORDER BY weekday, hour",
-                (station_id, fuel_type, cutoff)
-            ).fetchall()
+            if all_stations:
+                rows = conn.execute(
+                    "SELECT weekday, hour, minute, change_amount, timestamp "
+                    "FROM price_changes "
+                    "WHERE fuel_type = ? AND timestamp > ? "
+                    "ORDER BY weekday, hour",
+                    (fuel_type, cutoff)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT weekday, hour, minute, change_amount, timestamp "
+                    "FROM price_changes "
+                    "WHERE station_id = ? AND fuel_type = ? AND timestamp > ? "
+                    "ORDER BY weekday, hour",
+                    (station_id, fuel_type, cutoff)
+                ).fetchall()
 
             # Gewichtete Aggregation pro (Wochentag, Stunde)
             groups = {}
             for wd, h, m, chg, ts in rows:
+                # Extreme Ausreisser ignorieren (z.B. Steuererhohungen, Marktschocks)
+                if abs(chg) > OUTLIER_THRESHOLD:
+                    continue
                 key = (wd, h)
                 if key not in groups:
                     groups[key] = {"w_sum": 0.0, "w_total": 0.0, "minutes": [], "count": 0}
@@ -405,57 +434,92 @@ def _predict_next_change(station, all_fuels):
     }
     """
     now = datetime.now(BERLIN_TZ)
-    hour = now.hour
-    minute = now.minute
     weekday = now.weekday()
     station_id = station.get("id", "")
 
-    # --- Stufe 1: Datengetriebene Vorhersage ---
-    change_patterns = _get_change_pattern(station_id, "e5", days_back=56)
+    # Kraftstoff-spezifische Muster fuer alle DB-Typen laden
+    def _build_fuel_patterns_dict(sid, days, global_mode=False):
+        return {
+            ft: _get_change_pattern(sid, ft, days_back=days, all_stations=global_mode)
+            for ft in ("e5", "diesel", "e10")
+        }
 
-    # Haben wir genug Daten fuer diesen Wochentag?
-    today_patterns = change_patterns.get(weekday, [])
+    def _all_wd_patterns(fp_dict):
+        """Aggregiert alle Wochentage stunden-gewichtet."""
+        all_pats = []
+        for wd_pats in fp_dict.get("e5", {}).values():
+            all_pats.extend(wd_pats)
+        if not all_pats:
+            return []
+        hourly = {}
+        for h, m, avg_chg, cnt in all_pats:
+            if h not in hourly:
+                hourly[h] = {"w_sum": 0.0, "w_total": 0.0, "minutes": [], "count": 0}
+            hourly[h]["w_sum"] += avg_chg * cnt
+            hourly[h]["w_total"] += cnt
+            hourly[h]["minutes"].append(m)
+            hourly[h]["count"] += cnt
+        merged = []
+        for h, data in hourly.items():
+            avg = data["w_sum"] / data["w_total"]
+            avg_m = int(sum(data["minutes"]) / len(data["minutes"]))
+            merged.append((h, avg_m, round(avg, 4), data["count"]))
+        merged.sort(key=lambda x: x[0])
+        return merged
+
+    # --- Stufe 1: Stations-spezifisch, heutiger Wochentag ---
+    fp = _build_fuel_patterns_dict(station_id, days=56)
+    today_patterns = fp["e5"].get(weekday, [])
 
     if len(today_patterns) >= 3:
-        # Genug Daten: Finde die naechste typische Preisaenderung
         result = _predict_from_patterns(
-            station, all_fuels, today_patterns, now, "ki"
+            station, all_fuels, today_patterns, now, "ki",
+            fuel_patterns_dict={ft: pats.get(weekday, []) for ft, pats in fp.items()}
         )
         if result:
             return result
 
-    # Alle Wochentage als Fallback
-    all_patterns = []
-    for wd_patterns in change_patterns.values():
-        all_patterns.extend(wd_patterns)
-
-    if len(all_patterns) >= 5:
-        # Aggregiere alle Wochentage
-        hourly_changes = {}
-        for h, m, avg_chg, cnt in all_patterns:
-            if h not in hourly_changes:
-                hourly_changes[h] = {"total_chg": 0, "count": 0, "minute": m}
-            hourly_changes[h]["total_chg"] += avg_chg * cnt
-            hourly_changes[h]["count"] += cnt
-
-        merged = []
-        for h, data in hourly_changes.items():
-            avg = data["total_chg"] / data["count"]
-            merged.append((h, data["minute"], round(avg, 4), data["count"]))
-        merged.sort(key=lambda x: x[0])
-
+    # --- Stufe 2: Stations-spezifisch, alle Wochentage ---
+    merged = _all_wd_patterns(fp)
+    if len(merged) >= 3:
         result = _predict_from_patterns(
-            station, all_fuels, merged, now, "ki-allgemein"
+            station, all_fuels, merged, now, "ki-allgemein",
+            fuel_patterns_dict={ft: sum(pats.values(), []) for ft, pats in fp.items()}
         )
         if result:
             return result
 
-    # --- Stufe 2: Saisonale + Tagesmuster ---
+    # --- Stufe 3: Alle Stationen gemeinsam (mehr Datenpunkte) ---
+    fp_global = _build_fuel_patterns_dict(station_id, days=56, global_mode=True)
+    today_global = fp_global["e5"].get(weekday, [])
+
+    if len(today_global) >= 5:
+        result = _predict_from_patterns(
+            station, all_fuels, today_global, now, "ki-global",
+            fuel_patterns_dict={ft: pats.get(weekday, []) for ft, pats in fp_global.items()}
+        )
+        if result:
+            return result
+
+    merged_global = _all_wd_patterns(fp_global)
+    if len(merged_global) >= 3:
+        result = _predict_from_patterns(
+            station, all_fuels, merged_global, now, "ki-global",
+            fuel_patterns_dict={ft: sum(pats.values(), []) for ft, pats in fp_global.items()}
+        )
+        if result:
+            return result
+
+    # --- Stufe 4: Statisches Tagesmuster ---
     return _predict_from_static(station, all_fuels, now)
 
 
-def _predict_from_patterns(station, all_fuels, patterns, now, source):
-    """Vorhersage basierend auf gelernten Preisaenderungs-Mustern."""
+def _predict_from_patterns(station, all_fuels, patterns, now, source, fuel_patterns_dict=None):
+    """Vorhersage basierend auf gelernten Preisaenderungs-Mustern.
+
+    fuel_patterns_dict: {db_key: [(h, m, avg_chg, cnt), ...]} fuer kraftstoff-spezifische Deltas.
+    Wenn nicht angegeben, wird das Delta aus `patterns` (E5) fuer alle Kraftstoffe genutzt.
+    """
     hour = now.hour
     minute = now.minute
 
@@ -482,25 +546,48 @@ def _predict_from_patterns(station, all_fuels, patterns, now, source):
         return None
 
     minutes_until = int((next_change - now).total_seconds() / 60)
+    next_hour = next_change.hour
 
-    # Prognostizierte Preise fuer alle Kraftstoffe berechnen
+    # Prognostizierte Preise: kraftstoff-spezifisches Delta wenn vorhanden
     fuel_predictions = {}
     for f in all_fuels:
         f_name = f.get("name", "?")
         f_price = f.get("price")
         if f_price and f_price > 0:
-            # Skaliere die Aenderung proportional zum Preis
-            predicted = round(f_price + next_change_amount, 4)
+            delta = next_change_amount  # E5-Fallback
+            if fuel_patterns_dict:
+                fuel_key = _get_fuel_key(f_name)
+                if fuel_key and fuel_key in fuel_patterns_dict:
+                    # Naechste Aenderung dieses Kraftstoffs zur selben Stunde suchen
+                    for fh, fm, fchg, fcnt in fuel_patterns_dict[fuel_key]:
+                        if fh == next_hour:
+                            delta = fchg
+                            break
+            predicted = round(f_price + delta, 4)
             fuel_predictions[f_name] = {
                 "current": f_price,
                 "predicted": predicted,
             }
 
-    # Konfidenz berechnen
+    # Konfidenz: log-Skala + Abzug fuer aggregierte Quellen
     total_data = sum(cnt for _, _, _, cnt in patterns)
-    confidence = min(95, 30 + int(total_data * 2))
+    import math as _math
+    log_factor = int(_math.log1p(total_data) * 15)  # log1p(33)~3.5 -> 52; log1p(100)~4.6 -> 69
+    base_confidence = min(90, 25 + log_factor)
+    # Abzug wenn wir ueber alle Wochentage aggregieren mussten
+    if source == "ki-allgemein":
+        base_confidence = int(base_confidence * 0.85)
+    elif source == "ki-global":
+        base_confidence = int(base_confidence * 0.75)
+    confidence = max(20, base_confidence)
 
-    # Grund-Text
+    # Repraesentativ fuer die Warnung: groessten Anstieg aller Kraftstoffe pruefen
+    max_delta = max(
+        (pred["predicted"] - pred["current"] for pred in fuel_predictions.values()),
+        default=next_change_amount
+    )
+
+    # Grund-Text (basiert auf E5-Referenz-Delta)
     if next_change_amount > 0.03:
         reason = "Starker Preisanstieg erwartet"
     elif next_change_amount > 0.001:
@@ -513,7 +600,7 @@ def _predict_from_patterns(station, all_fuels, patterns, now, source):
         reason = "Preis bleibt voraussichtlich stabil"
 
     # Warnung wenn Anstieg in < 15 Minuten
-    warning = (next_change_amount > 0.001 and minutes_until <= 15)
+    warning = (max_delta > 0.001 and minutes_until <= 15)
 
     return {
         "change_time": next_change,
@@ -583,10 +670,10 @@ def _predict_from_static(station, all_fuels, now):
 
     minutes_until = int((next_change_time - now).total_seconds() / 60)
 
-    # Saisonalen Faktor einbeziehen
-    seasonal_offset = SEASONAL_MONTHLY_OFFSET.get(month, 0) / 100
-    weekday_offset = WEEKDAY_FACTOR.get(weekday, 0) / 100
-    change_amount = (next_change_cents / 100) + seasonal_offset * 0.1 + weekday_offset * 0.05
+    # Saisonalen Faktor einbeziehen (Werte in Cent -> EUR, dann gewichtet addieren)
+    seasonal_eur = SEASONAL_MONTHLY_OFFSET.get(month, 0) / 100
+    weekday_eur = WEEKDAY_FACTOR.get(weekday, 0) / 100
+    change_amount = (next_change_cents / 100) + seasonal_eur * 0.3 + weekday_eur * 0.2
 
     # Prognostizierte Preise
     fuel_predictions = {}
