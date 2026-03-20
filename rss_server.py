@@ -32,7 +32,6 @@ import pytz
 import sqlite3
 import os
 import threading
-import math
 import re
 
 # ---------------------------------------------------------------------------
@@ -368,8 +367,8 @@ def _predict_next_change(station, all_fuels):
         "change_time": datetime,       # Wann aendert sich der Preis?
         "minutes_until": int,           # Minuten bis zur Aenderung
         "fuels": {                      # Prognostizierte Preise pro Kraftstoff
-            "Super E5": {"current": 1.88, "predicted": 1.93, "direction": "^"},
-            "Diesel": {"current": 2.10, "predicted": 2.15, "direction": "^"},
+            "Super E5": {"current": 1.88, "predicted": 1.93},
+            "Diesel": {"current": 2.10, "predicted": 2.15},
         },
         "reason": str,
         "confidence": int,
@@ -464,16 +463,9 @@ def _predict_from_patterns(station, all_fuels, patterns, now, source):
         if f_price and f_price > 0:
             # Skaliere die Aenderung proportional zum Preis
             predicted = round(f_price + next_change_amount, 4)
-            if next_change_amount > 0.001:
-                direction = "(+)"
-            elif next_change_amount < -0.001:
-                direction = "(-)"
-            else:
-                direction = "="
             fuel_predictions[f_name] = {
                 "current": f_price,
                 "predicted": predicted,
-                "direction": direction,
             }
 
     # Konfidenz berechnen
@@ -575,16 +567,9 @@ def _predict_from_static(station, all_fuels, now):
         f_price = f.get("price")
         if f_price and f_price > 0:
             predicted = round(f_price + change_amount, 4)
-            if change_amount > 0.001:
-                direction = "(+)"
-            elif change_amount < -0.001:
-                direction = "(-)"
-            else:
-                direction = "="
             fuel_predictions[f_name] = {
                 "current": f_price,
                 "predicted": predicted,
-                "direction": direction,
             }
 
     # Grund-Text
@@ -626,13 +611,6 @@ def _format_price(price):
     truncated = int(price * 100) / 100
     return f"{truncated:.2f}".replace(".", ",")
 
-
-def _format_price_eur(price):
-    """Formatiert den Preis als EUR-String: 1,88 EUR"""
-    if price is None:
-        return "---"
-    truncated = int(price * 100) / 100
-    return f"{truncated:.2f}".replace(".", ",") + " EUR"
 
 
 def _parse_timestamp(ts_str):
@@ -908,18 +886,12 @@ def _build_feed():
                         pred_info = prediction["fuels"].get(f_name)
                         if pred_info:
                             pred_price = pred_info["predicted"]
-                            direction = pred_info["direction"]
-                            # Pfeil zeigt immer auf den niedrigeren Preis
-                            # Reihenfolge: hoeherer Preis PFEIL niedrigerer Preis
-                            if pred_price < f_price:
-                                # Preis faellt -> Pfeil zeigt auf niedrigeren zukuenftigen Preis
-                                detail_line = f"{f_name}: {_format_price(f_price)} EUR > {_format_price(pred_price)} EUR"
-                            elif pred_price > f_price:
-                                # Preis steigt -> Pfeil zeigt auf niedrigeren aktuellen Preis
-                                detail_line = f"{f_name}: {_format_price(pred_price)} EUR > {_format_price(f_price)} EUR"
+                            # Reihenfolge: aktuell -> prognose (chronologisch korrekt)
+                            if pred_price != f_price:
+                                detail_line = f"{f_name}: {_format_price(f_price)} EUR -> {_format_price(pred_price)} EUR"
                             else:
                                 # Preis bleibt gleich
-                                detail_line = f"{f_name}: {_format_price(f_price)} EUR = {_format_price(pred_price)} EUR"
+                                detail_line = f"{f_name}: {_format_price(f_price)} EUR (gleich)"
                             
                             desc_parts.append(detail_line)
                         else:
