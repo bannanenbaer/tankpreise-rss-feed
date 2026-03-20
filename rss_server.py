@@ -32,6 +32,7 @@ import pytz
 import sqlite3
 import os
 import threading
+import math
 import re
 
 # ---------------------------------------------------------------------------
@@ -58,6 +59,8 @@ BERLIN_TZ = pytz.timezone("Europe/Berlin")
 _cache = TTLCache(maxsize=5, ttl=180)
 # Cache fuer Stationsdetails: 1 Stunde (Oeffnungszeiten aendern sich selten)
 _detail_cache = TTLCache(maxsize=20, ttl=3600)
+# Letztes DB-Cleanup (nur einmal taeglich ausfuehren)
+_last_db_cleanup = None
 
 # ---------------------------------------------------------------------------
 # Statische Shop-Oeffnungszeiten fuer Tankautomaten-Stationen
@@ -240,11 +243,15 @@ def _record_price_db(station_id, station_name, fuel_type, price, timestamp):
 
                 conn.commit()
 
-            # Alte Daten aufraeumen (aelter als 180 Tage)
-            cutoff = (timestamp - timedelta(days=180)).isoformat()
-            conn.execute("DELETE FROM price_history WHERE timestamp < ?", (cutoff,))
-            conn.execute("DELETE FROM price_changes WHERE timestamp < ?", (cutoff,))
-            conn.commit()
+            # Alte Daten aufraeumen (aelter als 180 Tage) - nur einmal taeglich
+            global _last_db_cleanup
+            today = timestamp.date()
+            if _last_db_cleanup != today:
+                cutoff = (timestamp - timedelta(days=180)).isoformat()
+                conn.execute("DELETE FROM price_history WHERE timestamp < ?", (cutoff,))
+                conn.execute("DELETE FROM price_changes WHERE timestamp < ?", (cutoff,))
+                conn.commit()
+                _last_db_cleanup = today
         except Exception as e:
             log.error("DB-Schreibfehler: %s", e)
         finally:
@@ -571,8 +578,7 @@ def _predict_from_patterns(station, all_fuels, patterns, now, source, fuel_patte
 
     # Konfidenz: log-Skala + Abzug fuer aggregierte Quellen
     total_data = sum(cnt for _, _, _, cnt in patterns)
-    import math as _math
-    log_factor = int(_math.log1p(total_data) * 15)  # log1p(33)~3.5 -> 52; log1p(100)~4.6 -> 69
+    log_factor = int(math.log1p(total_data) * 15)  # log1p(33)~3.5 -> 52; log1p(100)~4.6 -> 69
     base_confidence = min(90, 25 + log_factor)
     # Abzug wenn wir ueber alle Wochentage aggregieren mussten
     if source == "ki-allgemein":
