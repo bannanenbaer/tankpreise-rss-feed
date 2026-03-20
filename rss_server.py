@@ -50,7 +50,12 @@ LAT = 52.2762744
 LNG = 9.5671846
 RADIUS = 5
 MAX_STATIONS = 5
-API_KEY = "77ee8866-8df3-45f0-8f63-70c4d1c76bff"
+API_KEY = os.environ.get("TANKERKOENIG_API_KEY", "")
+if not API_KEY:
+    raise RuntimeError(
+        "Umgebungsvariable TANKERKOENIG_API_KEY ist nicht gesetzt. "
+        "Bitte in .env oder Systemumgebung setzen."
+    )
 API_URL = "https://creativecommons.tankerkoenig.de/api/v4/stations/search"
 DETAIL_URL = "https://creativecommons.tankerkoenig.de/json/detail.php"
 BERLIN_TZ = pytz.timezone("Europe/Berlin")
@@ -78,8 +83,9 @@ _SHOP_HOURS = {
     },
 }
 
-# Pfad fuer die SQLite-Datenbank
-DB_PATH = os.environ.get("TANK_DB_PATH", "/tmp/tankpreise.db")
+# Pfad fuer die SQLite-Datenbank (Standard: Projektverzeichnis, konfigurierbar per Env)
+_DEFAULT_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tankpreise.db")
+DB_PATH = os.environ.get("TANK_DB_PATH", _DEFAULT_DB_PATH)
 
 # Thread-Lock fuer SQLite
 _db_lock = threading.Lock()
