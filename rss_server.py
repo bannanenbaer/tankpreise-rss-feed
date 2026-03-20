@@ -295,27 +295,55 @@ def _get_change_pattern(station_id, fuel_type="e5", days_back=28):
     """Analysiert die typischen Preisaenderungs-Zeitpunkte einer Station.
 
     Gibt ein Dict zurueck: {weekday: [(hour, minute, avg_change, count), ...]}
-    Sortiert nach Haeufigkeit.
+    Neuere Daten werden staerker gewichtet (Halbwertszeit: 14 Tage).
     """
+    HALFLIFE_DAYS = 14.0
     patterns = {}
     cutoff = (datetime.now(BERLIN_TZ) - timedelta(days=days_back)).isoformat()
+    now_dt = datetime.now(BERLIN_TZ)
 
     with _db_lock:
         conn = sqlite3.connect(DB_PATH)
         try:
             rows = conn.execute(
-                "SELECT weekday, hour, minute, AVG(change_amount), COUNT(*) "
+                "SELECT weekday, hour, minute, change_amount, timestamp "
                 "FROM price_changes "
                 "WHERE station_id = ? AND fuel_type = ? AND timestamp > ? "
-                "GROUP BY weekday, hour "
                 "ORDER BY weekday, hour",
                 (station_id, fuel_type, cutoff)
             ).fetchall()
 
-            for wd, h, m, avg_chg, cnt in rows:
-                if wd not in patterns:
-                    patterns[wd] = []
-                patterns[wd].append((h, m, round(avg_chg, 4), cnt))
+            # Gewichtete Aggregation pro (Wochentag, Stunde)
+            groups = {}
+            for wd, h, m, chg, ts in rows:
+                key = (wd, h)
+                if key not in groups:
+                    groups[key] = {"w_sum": 0.0, "w_total": 0.0, "minutes": [], "count": 0}
+                try:
+                    ts_dt = datetime.fromisoformat(ts)
+                    if ts_dt.tzinfo is None:
+                        ts_dt = ts_dt.replace(tzinfo=BERLIN_TZ)
+                    days_old = max(0.0, (now_dt - ts_dt).total_seconds() / 86400)
+                except Exception:
+                    days_old = days_back
+                # Exponentieller Abfall: Halbwertszeit 14 Tage
+                weight = 0.5 ** (days_old / HALFLIFE_DAYS)
+                groups[key]["w_sum"] += chg * weight
+                groups[key]["w_total"] += weight
+                groups[key]["minutes"].append(m)
+                groups[key]["count"] += 1
+
+            for (wd, h), data in groups.items():
+                if data["w_total"] > 0:
+                    weighted_avg = data["w_sum"] / data["w_total"]
+                    avg_minute = int(sum(data["minutes"]) / len(data["minutes"]))
+                    if wd not in patterns:
+                        patterns[wd] = []
+                    patterns[wd].append((h, avg_minute, round(weighted_avg, 4), data["count"]))
+
+            for wd in patterns:
+                patterns[wd].sort(key=lambda x: x[0])
+
         except Exception as e:
             log.error("DB-Lesefehler (Pattern): %s", e)
         finally:
@@ -887,8 +915,10 @@ def _build_feed():
                         if pred_info:
                             pred_price = pred_info["predicted"]
                             # Reihenfolge: aktuell -> prognose (chronologisch korrekt)
-                            if pred_price != f_price:
-                                detail_line = f"{f_name}: {_format_price(f_price)} EUR -> {_format_price(pred_price)} EUR"
+                            if pred_price > f_price:
+                                detail_line = f"{f_name}: {_format_price(f_price)} EUR -> {_format_price(pred_price)} EUR (+)"
+                            elif pred_price < f_price:
+                                detail_line = f"{f_name}: {_format_price(f_price)} EUR -> {_format_price(pred_price)} EUR (-)"
                             else:
                                 # Preis bleibt gleich
                                 detail_line = f"{f_name}: {_format_price(f_price)} EUR (gleich)"
