@@ -1,20 +1,22 @@
 FROM python:3.12-slim
 
+# Git installieren
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# Abhängigkeiten installieren
+# Abhängigkeiten vorab installieren (werden gecacht, nur neu gebaut wenn requirements.txt sich ändert)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# App-Code kopieren
-COPY rss_server.py .
 
 # Persistentes Verzeichnis für SQLite-Datenbank
 RUN mkdir -p /data
 VOLUME ["/data"]
 
-# Port freigeben
+# Startskript: zieht beim Start immer den neuesten Code von GitHub
+COPY start.sh .
+RUN chmod +x start.sh
+
 EXPOSE 5000
 
-# Gunicorn starten
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "60", "rss_server:app"]
+CMD ["/app/start.sh"]
