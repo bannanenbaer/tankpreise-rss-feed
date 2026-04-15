@@ -1156,10 +1156,41 @@ def index():
     )
 
 
+# ---------------------------------------------------------------------------
+# Hintergrund-Refresh: Feed alle 10 Minuten proaktiv aktualisieren
+# ---------------------------------------------------------------------------
+_feed_cache = {"xml": None}
+_FEED_REFRESH_INTERVAL = 600  # 10 Minuten
+import time as _time_module
+
+
+def _refresh_feed_background():
+    """Hintergrund-Thread: Baut den Feed alle 10 Minuten neu auf."""
+    while True:
+        try:
+            log.info("[Hintergrund] Starte Feed-Aktualisierung...")
+            xml = _build_feed()
+            _feed_cache["xml"] = xml
+            log.info("[Hintergrund] Feed erfolgreich aktualisiert.")
+        except Exception as e:
+            log.error("[Hintergrund] Fehler beim Aktualisieren des Feeds: %s", e)
+        _time_module.sleep(_FEED_REFRESH_INTERVAL)
+
+
+_refresh_thread = threading.Thread(target=_refresh_feed_background, daemon=True)
+_refresh_thread.start()
+
+
 @app.route("/feed.rss")
 @app.route("/feed")
 def rss_feed():
-    xml = _build_feed()
+    # Gecachten Feed sofort zurueckgeben (wird alle 10 Min. im Hintergrund aktualisiert)
+    if _feed_cache["xml"] is not None:
+        xml = _feed_cache["xml"]
+    else:
+        log.info("Feed-Cache noch leer - baue Feed direkt...")
+        xml = _build_feed()
+        _feed_cache["xml"] = xml
     resp = Response(xml, mimetype="application/rss+xml")
     resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     resp.headers["Pragma"] = "no-cache"
