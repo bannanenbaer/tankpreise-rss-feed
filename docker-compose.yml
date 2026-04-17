@@ -1,7 +1,7 @@
 services:
   tankpreise:
-    image: ghcr.io/bannanenbaer/tankpreise-rss-feed:latest
-    pull_policy: always
+    build:
+      context: https://github.com/bannanenbaer/tankpreise-rss-feed.git#main
     restart: unless-stopped
     ports:
       - "5001:5000"
