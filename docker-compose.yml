@@ -1,17 +1,7 @@
 services:
   tankpreise:
-    build:
-      context: .
-      dockerfile_inline: |
-        FROM python:3.12-slim
-        RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
-        WORKDIR /app
-        RUN pip install --no-cache-dir flask==3.0.0 requests==2.31.0 gunicorn==21.2.0 cachetools pytz
-        RUN mkdir -p /data
-        RUN printf '#!/bin/sh\nset -e\ngit clone --depth=1 https://github.com/bannanenbaer/tankpreise-rss-feed.git /tmp/repo\ncp /tmp/repo/rss_server.py /app/rss_server.py\nrm -rf /tmp/repo\nexec gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 60 rss_server:app\n' > /app/start.sh && chmod +x /app/start.sh
-        VOLUME ["/data"]
-        EXPOSE 5000
-        CMD ["/app/start.sh"]
+    image: ghcr.io/bannanenbaer/tankpreise-rss-feed:latest
+    pull_policy: always
     restart: unless-stopped
     ports:
       - "5001:5000"
