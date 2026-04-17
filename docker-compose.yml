@@ -1,7 +1,7 @@
 services:
   tankpreise:
     build:
-      context: https://github.com/bannanenbaer/tankpreise-rss-feed.git#main
+      context: https://github.com/bannanenbaer/tankpreise-rss-feed/archive/refs/heads/main.tar.gz
     restart: unless-stopped
     ports:
       - "5001:5000"
