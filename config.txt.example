@@ -1,0 +1,12 @@
+# Tankpreise RSS-Feed - Konfiguration
+# Kopiere diese Datei nach "config.txt" und trage deine Werte ein.
+# config.txt wird nicht ins Git-Repository eingecheckt.
+
+# Tankerkoenig API-Key (kostenlos beantragen auf creativecommons.tankerkoenig.de)
+api_key = DEIN-API-KEY-HIER
+
+# Postleitzahl des gesuchten Standorts (Deutschland)
+plz = 30974
+
+# Suchradius in km (1-25, Standard: 5)
+radius = 5

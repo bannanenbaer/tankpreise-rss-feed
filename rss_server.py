@@ -46,11 +46,65 @@ log = logging.getLogger("tankpreise")
 
 app = Flask(__name__)
 
+
+def _load_config_file():
+    """Laedt Konfiguration aus config.txt (oder TANK_CONFIG_PATH)."""
+    path = os.environ.get("TANK_CONFIG_PATH", "config.txt")
+    cfg = {}
+    if not os.path.exists(path):
+        return cfg
+    with open(path, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                cfg[k.strip().lower()] = v.strip()
+    log.info("config.txt geladen: %s", path)
+    return cfg
+
+
+def _plz_to_latlon(plz):
+    """Konvertiert eine deutsche PLZ in (lat, lng, ortsname) via Nominatim."""
+    try:
+        r = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"postalcode": plz, "country": "de", "format": "json", "limit": 1},
+            headers={"User-Agent": "tankpreise-rss-feed/1.0"},
+            timeout=10,
+        )
+        data = r.json()
+        if data:
+            name = data[0].get("display_name", "").split(",")[0].strip()
+            return float(data[0]["lat"]), float(data[0]["lon"]), name or plz
+    except Exception as e:
+        log.warning("PLZ-Geocoding fehlgeschlagen (%s): %s", plz, e)
+    return None, None, plz
+
+
+# Standardwerte
 LAT = 52.2762744
 LNG = 9.5671846
 RADIUS = 5
 MAX_STATIONS = 5
+LOCATION_NAME = "Wennigsen"
 API_KEY = os.environ.get("TANKERKOENIG_API_KEY", "")
+
+# Konfigurationsdatei einlesen und Standardwerte ueberschreiben
+_cfg = _load_config_file()
+if _cfg.get("api_key"):
+    API_KEY = _cfg["api_key"]
+if _cfg.get("radius"):
+    RADIUS = int(_cfg["radius"])
+if _cfg.get("plz"):
+    _plz = _cfg["plz"].strip()
+    _lat, _lng, _name = _plz_to_latlon(_plz)
+    if _lat is not None:
+        LAT, LNG, LOCATION_NAME = _lat, _lng, _name
+        log.info("Standort: PLZ %s -> %s (%.4f, %.4f)", _plz, LOCATION_NAME, LAT, LNG)
+    else:
+        log.warning("PLZ '%s' nicht gefunden, nutze Standardkoordinaten.", _plz)
+        LOCATION_NAME = _plz
+
 API_URL = "https://creativecommons.tankerkoenig.de/api/v4/stations/search"
 DETAIL_URL = "https://creativecommons.tankerkoenig.de/json/detail.php"
 BERLIN_TZ = pytz.timezone("Europe/Berlin")
@@ -808,12 +862,12 @@ def _build_feed():
 
     rss = ET.Element("rss", version="2.0")
     channel = ET.SubElement(rss, "channel")
-    ET.SubElement(channel, "title").text = "Tankpreise - Wennigsen"
+    ET.SubElement(channel, "title").text = f"Tankpreise - {LOCATION_NAME}"
     ET.SubElement(channel, "link").text = (
         "https://creativecommons.tankerkoenig.de"
     )
     ET.SubElement(channel, "description").text = (
-        "Tankpreise im Umkreis von Wennigsen (Deister)"
+        f"Tankpreise im Umkreis von {LOCATION_NAME}"
     )
     ET.SubElement(channel, "language").text = "de-de"
     ET.SubElement(channel, "lastBuildDate").text = (
@@ -1142,7 +1196,7 @@ def _build_feed():
 def index():
     stats = _get_db_stats()
     return (
-        "<h1>Tankpreise RSS - Wennigsen</h1>"
+        f"<h1>Tankpreise RSS - {LOCATION_NAME}</h1>"
         "<p><a href='/feed.rss'>Zum RSS-Feed</a></p>"
         "<p>Datenquelle: Tankerk&ouml;nig API v4 (CC BY 4.0)</p>"
         "<hr>"
@@ -1210,7 +1264,7 @@ def stats():
     db_stats = _get_db_stats()
     now = datetime.now(BERLIN_TZ)
 
-    html = ["<h1>KI-Statistiken - Tankpreise Wennigsen</h1>"]
+    html = [f"<h1>KI-Statistiken - Tankpreise {LOCATION_NAME}</h1>"]
     html.append(f"<p>Aktuelle Zeit: {now.strftime('%d.%m.%Y %H:%M')}</p>")
     html.append(f"<p>Datensaetze: {db_stats['total_records']}</p>")
     html.append(f"<p>Erkannte Preisaenderungen: {db_stats['total_changes']}</p>")
